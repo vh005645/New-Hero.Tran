@@ -148,7 +148,7 @@ pat = re.compile(r'(?<!\\)\\(?![nrtf"\'\\u])')
 total = 0
 for p in pathlib.Path("src").rglob("*.java"):
     txt = p.read_text(encoding="utf-8", errors="ignore")
-    new, n = pat.subn(r'\\', txt)
+    new, n = pat.subn(lambda m: chr(92) + chr(92), txt)
     if n:
         print(f"FIX {p}: sua {n} escape 1-gach -> 2-gach")
         p.write_text(new, encoding="utf-8")
