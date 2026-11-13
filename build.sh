@@ -159,6 +159,53 @@ else:
     print("AUTO-FIX: khong co escape 1-gach can sua")
 FIXEOF
 
+
+# ---------- 3c. AUTO-FIX: them class GoldResult neu bi thieu ----------
+"$PY" <<'GOLDFIXEOF'
+import pathlib
+p = pathlib.Path("src/vn/herotran/launcher/MarketService.java")
+if p.exists():
+    txt = p.read_text(encoding="utf-8", errors="ignore")
+    if "class GoldResult" not in txt and "GoldResult" in txt:
+        stub_lines = [
+            '    // AUTO-FIX V4: class GoldResult bi thieu khi paste method fetchGiavangGold / parseGiavangText',
+            '    // Neu code cua ban dung them field khac, chi can them 1 dong public String <ten> vao day la xong.',
+            '    static final class GoldResult {',
+            '        public String sjcBuy;',
+            '        public String sjcSell;',
+            '        public String nhanBuy;',
+            '        public String nhanSell;',
+            '        public String worldGold;',
+            '        public String world;',
+            '        public String sjc;',
+            '        public String nhan;',
+            '        public String buy;',
+            '        public String sell;',
+            '        public String muaVao;',
+            '        public String banRa;',
+            '        public String giaMua;',
+            '        public String giaBan;',
+            '        public String price;',
+            '        public String date;',
+            '        public String today;',
+            '        public String source;',
+            '        public boolean ok;',
+            '        public boolean found;',
+            '        public boolean success;',
+            '        public boolean sample;',
+            '    }',
+        ]
+        stub = chr(10).join(stub_lines) + chr(10)
+        idx = txt.rstrip().rfind(chr(125))
+        new = txt[:idx] + stub + txt[idx:]
+        p.write_text(new, encoding="utf-8")
+        print("GOLD-FIX: da them class GoldResult con thieu")
+    elif "class GoldResult" in txt:
+        print("GOLD-FIX: GoldResult da co, khong can them")
+    else:
+        print("GOLD-FIX: khong dung GoldResult, bo qua")
+GOLDFIXEOF
+
 find src -name "*.java" > "$OUT/sources.txt"
 if ! javac --release 8 -Xlint:-options -cp "$PLAT" -d "$OUT/classes" @"$OUT/sources.txt"; then
   echo "⚠️ javac --release 8 that bai, thu lai voi --release 17..."
