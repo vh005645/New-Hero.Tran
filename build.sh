@@ -135,6 +135,30 @@ fi
 "$AAPT2" link -o "$OUT/base.apk" -I "$PLAT" --manifest AndroidManifest.xml $LINK_RES
 echo "✅ aapt2 link xong"
 
+
+# ---------- 3b. AUTO-FIX: tu sua escape \d \s \. trong MarketService.java ----------
+# Ly do: paste tu chat / GitHub web hay bi nuot mat 1 dau \  ->  "\d" thanh "\d" (1 gach)
+# javac bao illegal escape. Fixer nay chay moi lan build, nen du file tren repo
+# van con 1 gach thi build van xanh. Neu file da dung 2 gach thi khong doi gi.
+"$PY" <<'FIXEOF'
+import re, pathlib
+# Escape hop le trong Java, KHONG duoc gap doi: \n \t \r \f \" \' \\ \uXXXX
+# Con lai (\d \s \. \- \/ \( \[ ...) deu la regex -> phai gap doi thanh \\d \\s \\.
+pat = re.compile(r'(?<!\\)\\(?![nrtf"\'\\u])')
+total = 0
+for p in pathlib.Path("src").rglob("*.java"):
+    txt = p.read_text(encoding="utf-8", errors="ignore")
+    new, n = pat.subn(r'\\', txt)
+    if n:
+        print(f"FIX {p}: sua {n} escape 1-gach -> 2-gach")
+        p.write_text(new, encoding="utf-8")
+        total += n
+if total:
+    print(f"AUTO-FIX: da sua {total} cho")
+else:
+    print("AUTO-FIX: khong co escape 1-gach can sua")
+FIXEOF
+
 find src -name "*.java" > "$OUT/sources.txt"
 if ! javac --release 8 -Xlint:-options -cp "$PLAT" -d "$OUT/classes" @"$OUT/sources.txt"; then
   echo "⚠️ javac --release 8 that bai, thu lai voi --release 17..."
