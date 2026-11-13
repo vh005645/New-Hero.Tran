@@ -1,6 +1,5 @@
 name: Build Hero Tran Launcher APK
 
-# Chay khi: push len main/master, PR, bam nut Run workflow, hoac push tag v* de tao Release
 on:
   push:
     branches: [main, master]
@@ -9,7 +8,6 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
-# Can quyen ghi de tao Release khi push tag
 permissions:
   contents: write
 
@@ -18,21 +16,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install platform + build-tools
+      # FIX: Khong dung android-actions/setup-android@v3 nua.
+      # Action do mac dinh cai packages "tools platform-tools",
+      # ma goi "tools" da bi Google xoa -> sdkmanager bao
+      # "Failed to find package 'tools'" va fail exit code 1.
+      # Runner ubuntu-24.04 da co san SDK o /usr/local/lib/android/sdk,
+      # chi can cai them platforms + build-tools can dung.
+      - name: Install Android platform + build-tools
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          if [ -z "$ANDROID_HOME" ]; then
+            echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+            export ANDROID_HOME=/usr/local/lib/android/sdk
+          fi
           echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMGR" ]; then SDKMGR="$(command -v sdkmanager)"; fi
+          echo "sdkmanager: $SDKMGR"
+          "$SDKMGR" --version
+          yes | "$SDKMGR" --licenses > /dev/null || true
+          "$SDKMGR" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
           ls "$ANDROID_HOME/build-tools/"
 
       - name: Tim thu muc project
