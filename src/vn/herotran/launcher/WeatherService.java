@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Tự động định vị vị trí theo IP qua các dịch vụ miễn phí (ipwho.is, ipinfo.io, ip-api.com)
+ * Vị trí cố định tại Phường Nhị Chiểu, TP. Hải Phòng (không check theo IP nữa)
  * sau đó lấy dự báo thời tiết thời gian thực từ Open-Meteo (kèm bộ nhớ đệm TTL).
  */
 public final class WeatherService {
@@ -32,14 +32,17 @@ public final class WeatherService {
 
     private static final String[] DAY_LABELS = {"Chủ Nhật", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7"};
 
+    // Tọa độ cố định: Phường Nhị Chiểu, TP. Hải Phòng
+    // Nguồn: Wikipedia - 21°01'17"B 106°33'26"Đ
+    private static final String FIXED_LAT = "21.021479";
+    private static final String FIXED_LON = "106.557158";
+    private static final String FIXED_CITY = "Phường Nhị Chiểu, TP. Hải Phòng";
+
     private static final long WEATHER_TTL_MS = 30 * 60 * 1000L;     // 30 phút cho dữ liệu thật
     private static final long SAMPLE_RETRY_MS = 60 * 1000L;         // 1 phút nếu đang là dữ liệu mẫu
-    private static final long LOCATION_TTL_MS = 6 * 60 * 60 * 1000L; // 6 giờ cho tọa độ IP
 
     private static volatile Weather cachedWeather;
     private static volatile long lastWeatherFetchTime = 0;
-    private static volatile GeoLocation cachedLocation;
-    private static volatile long lastLocationTime = 0;
     private static final AtomicBoolean isFetching = new AtomicBoolean(false);
 
     public interface Callback {
@@ -132,74 +135,8 @@ public final class WeatherService {
     }
 
     private static GeoLocation detectLocation() {
-        GeoLocation loc = cachedLocation;
-        long now = SystemClock.elapsedRealtime();
-        if (loc != null && !loc.isFallback && (now - lastLocationTime) < LOCATION_TTL_MS) {
-            return loc;
-        }
-
-        // 1. Thử ipwho.is
-        try {
-            String jsonStr = get("https://ipwho.is/?lang=vi");
-            JSONObject obj = new JSONObject(jsonStr);
-            if (obj.optBoolean("success", false) || obj.has("latitude")) {
-                double lat = obj.getDouble("latitude");
-                double lon = obj.getDouble("longitude");
-                String city = obj.optString("city", "");
-                if (city.isEmpty()) {
-                    city = obj.optString("region", "Việt Nam");
-                }
-                GeoLocation detected = new GeoLocation(String.valueOf(lat), String.valueOf(lon), formatCityName(city), false);
-                cachedLocation = detected;
-                lastLocationTime = SystemClock.elapsedRealtime();
-                return detected;
-            }
-        } catch (Exception ignored) {
-        }
-
-        // 2. Thử ipinfo.io
-        try {
-            String jsonStr = get("https://ipinfo.io/json");
-            JSONObject obj = new JSONObject(jsonStr);
-            String locStr = obj.optString("loc", "");
-            if (locStr.contains(",")) {
-                String[] parts = locStr.split(",");
-                String city = obj.optString("city", "");
-                if (city.isEmpty()) {
-                    city = obj.optString("region", "Việt Nam");
-                }
-                GeoLocation detected = new GeoLocation(parts[0].trim(), parts[1].trim(), formatCityName(city), false);
-                cachedLocation = detected;
-                lastLocationTime = SystemClock.elapsedRealtime();
-                return detected;
-            }
-        } catch (Exception ignored) {
-        }
-
-        // 3. Thử ip-api.com
-        try {
-            String jsonStr = get("http://ip-api.com/json");
-            JSONObject obj = new JSONObject(jsonStr);
-            if ("success".equalsIgnoreCase(obj.optString("status", ""))) {
-                double lat = obj.getDouble("lat");
-                double lon = obj.getDouble("lon");
-                String city = obj.optString("city", "");
-                if (city.isEmpty()) {
-                    city = obj.optString("regionName", "Việt Nam");
-                }
-                GeoLocation detected = new GeoLocation(String.valueOf(lat), String.valueOf(lon), formatCityName(city), false);
-                cachedLocation = detected;
-                lastLocationTime = SystemClock.elapsedRealtime();
-                return detected;
-            }
-        } catch (Exception ignored) {
-        }
-
-        if (loc != null) {
-            return loc;
-        }
-        // Mặc định nếu không định vị được IP: TP. Hồ Chí Minh
-        return new GeoLocation("10.823", "106.629", "TP. Hồ Chí Minh", true);
+        // Không check IP nữa, luôn trả về vị trí cố định Phường Nhị Chiểu
+        return new GeoLocation(FIXED_LAT, FIXED_LON, FIXED_CITY, false);
     }
 
     private static Weather fetch() throws Exception {
@@ -456,7 +393,7 @@ public final class WeatherService {
     public static Weather sample() {
         Weather w = new Weather();
         w.sample = true;
-        w.city = "TP. Hồ Chí Minh";
+        w.city = FIXED_CITY;
         w.condition = "Nhiều mây";
         w.temp = 31;
         w.tempMax = 32;
