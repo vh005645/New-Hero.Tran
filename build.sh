@@ -168,8 +168,7 @@ if p.exists():
     txt = p.read_text(encoding="utf-8", errors="ignore")
     if "class GoldResult" not in txt and "GoldResult" in txt:
         stub_lines = [
-            '    // AUTO-FIX V4: class GoldResult bi thieu khi paste method fetchGiavangGold / parseGiavangText',
-            '    // Neu code cua ban dung them field khac, chi can them 1 dong public String <ten> vao day la xong.',
+            '    // AUTO-FIX V5: class GoldResult bi thieu khi paste method fetchGiavangGold / parseGiavangText',
             '    static final class GoldResult {',
             '        public String sjcBuy;',
             '        public String sjcSell;',
@@ -193,6 +192,15 @@ if p.exists():
             '        public boolean found;',
             '        public boolean success;',
             '        public boolean sample;',
+            '        public boolean fresh;',
+            '        public boolean complete() {',
+            '            return notEmpty(sjcBuy) || notEmpty(sjcSell) || notEmpty(sjc)',
+            '                || notEmpty(nhanBuy) || notEmpty(nhanSell) || notEmpty(nhan)',
+            '                || notEmpty(worldGold) || notEmpty(world);',
+            '        }',
+            '        private boolean notEmpty(String s) {',
+            '            return s != null && !s.trim().isEmpty();',
+            '        }',
             '    }',
         ]
         stub = chr(10).join(stub_lines) + chr(10)
@@ -201,7 +209,16 @@ if p.exists():
         p.write_text(new, encoding="utf-8")
         print("GOLD-FIX: da them class GoldResult con thieu")
     elif "class GoldResult" in txt:
-        print("GOLD-FIX: GoldResult da co, khong can them")
+        # GoldResult da co nhung thieu fresh / complete (do paste snippet V4 cu) -> va them
+        if "fresh" not in txt or "complete()" not in txt:
+            gi = txt.find("class GoldResult")
+            brace = txt.find(chr(123), gi)
+            patch = chr(10) + "        public boolean fresh;" + chr(10) + "        public boolean complete() {" + chr(10) + "            return notEmpty(sjcBuy) || notEmpty(sjcSell) || notEmpty(sjc) || notEmpty(nhanBuy) || notEmpty(nhanSell) || notEmpty(nhan) || notEmpty(worldGold) || notEmpty(world);" + chr(10) + "        }" + chr(10) + "        private boolean notEmpty(String s) { return s != null && !s.trim().isEmpty(); }" + chr(10)
+            txt2 = txt[:brace+1] + patch + txt[brace+1:]
+            p.write_text(txt2, encoding="utf-8")
+            print("GOLD-FIX: da va them fresh + complete() vao GoldResult cu")
+        else:
+            print("GOLD-FIX: GoldResult da co, khong can them")
     else:
         print("GOLD-FIX: khong dung GoldResult, bo qua")
 GOLDFIXEOF
