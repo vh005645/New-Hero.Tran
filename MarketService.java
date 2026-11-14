@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
@@ -17,70 +18,59 @@ import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
 /**
- * XANG: PVOIL chinh thuc — https://www.pvoil.com.vn/tin-gia-xang-dau
- *   Bang dung theo anh nguoi dung gui (12/11/2026 15:00):
- *     1 Xang E10 RON 95-III  19.840 d  -1310
- *     2 Xang E5 RON 92-II    19.390 d  -1500
- *     3 Dau DO 0,05S-II      26.820 d  -1870
- *     4 Dau DO 0,001S-V      28.620 d  -1470
- *   Luu y: dung tin cache trinh duyet cu (31/10: 24.150 / 24.220 / 30.240).
- *   Do la bang cu, khong phai bang hien tai.
+ * NGUON DUY NHAT: webgia.com — theo yeu cau nguoi dung.
+ *   Xang:  https://webgia.com/gia-xang-dau/petrolimex/
+ *          + trang lich su theo ngay https://webgia.com/gia-xang-dau/petrolimex/YYYY-MM-DD.html
+ *          (trang hien tai doi khi load bang bang JS nen phai thu them trang ngay)
+ *   Vang:  https://webgia.com/gia-vang/sjc/
+ *          + https://webgia.com/gia-vang/
+ *          + https://webgia.com/gia-vang-the-gioi/ (vang the gioi)
  *
- * VANG: giavang.net chinh thuc — https://giavang.net/
- *   Lay tu bai viet moi nhat tren giavang.net + bang gia tren trang chu.
- *   Fallback VnExpress RSS chi khi giavang.net khong doc duoc, de khong hien Updating...
+ * QUAN TRONG — Dinh dang webgia.com khac han PVOIL / VnExpress:
+ *   - Vang SJC: don vi DONG/CHI, vd "Vang SJC 1L 13.500.000 13.800.000"
+ *     => 13.500.000 dong/chi = 135,0 trieu/luong (1 luong = 10 chi).
+ *     Phai chia 100.000, khong duoc lay thang 13.500.000 lam trieu.
+ *   - Vang nhan SJC: "Vang nhan SJC 99,99% 13.380.000 13.780.000" => 133,8 / 137,8 trieu/luong.
+ *   - Xang webgia: bang Petrolimex co 2 cot Vung 1 / Vung 2, vd "E5 RON 92-II 19.840 20.230".
+ *     Lay cot dau tien (Vung 1) = 19.840, khong lay cot Vung 2.
+ *   - Xang hien tai dung (12/11/2026 15:00): E10 19.840, E5 19.390, DO 0,05S 26.820.
+ *   - Vang hien tai dung (13/11/2026): SJC 135,0 - 138,0, nhan 133,8 - 137,8, the gioi ~3.895 USD.
  *
- * Khi khong lay duoc thi tat ca cac cot deu la "Updating..." (duy nhat, khong "Chua co du lieu").
+ * Khi khong lay duoc thi tat ca cac cot deu la "Updating..." (duy nhat).
  */
 public final class MarketService {
 
     public static final String NO_DATA = "Updating...";
     public static final String WAITING = "Updating...";
 
-    private static final String RSS_URL = "https://vnexpress.net/rss/kinh-doanh.rss";
+    // ---- webgia.com — Xang ----
+    private static final String WEBGIA_FUEL_PETROLIMEX = "https://webgia.com/gia-xang-dau/petrolimex/";
+    private static final String WEBGIA_FUEL = "https://webgia.com/gia-xang-dau/";
+    // Xang webgia: "E10 RON 95-III ... 19.840" — lay so dau tien sau ten (Vung 1)
+    private static final Pattern WEBGIA_E10 = Pattern.compile("(?i)E10\\s*RON\\s*95-III.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    private static final Pattern WEBGIA_E10_ANY = Pattern.compile("(?i)E10\\s*RON\\s*95.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    private static final Pattern WEBGIA_E5 = Pattern.compile("(?i)E5\\s*RON\\s*92.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    private static final Pattern WEBGIA_DIESEL = Pattern.compile("(?i)DO\\s*0[.,]05S.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    private static final Pattern WEBGIA_DIESEL2 = Pattern.compile("(?i)(?:Dầu|Dau)\\s*(?:DO|điêzen|diezen)?\\s*0[.,]05S.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    private static final Pattern WEBGIA_DATE = Pattern.compile("(\\d{1,2}/\\d{1,2}/\\d{4})");
 
-    // ---- Xang PVOIL ----
-    private static final String PVOIL_FUEL_URL = "https://www.pvoil.com.vn/tin-gia-xang-dau";
-    private static final String PVOIL_FUEL_URL_NOWWW = "https://pvoil.com.vn/tin-gia-xang-dau";
-    private static final Pattern PVOIL_DATE = Pattern.compile("ngày\\s*(\\d{1,2}/\\d{1,2}/\\d{4})");
-    // Cho phep bat ky ky tu giua ten va gia (ke ca NBSP da normalize), chap nhan 19.840 / 19,840
-    private static final Pattern PVOIL_E10 = Pattern.compile("(?i)E10\\s*RON\\s*95[^0-9]{0,40}?(\\d{2}[.,]\\d{3})");
-    private static final Pattern PVOIL_E5 = Pattern.compile("(?i)E5\\s*RON\\s*92[^0-9]{0,40}?(\\d{2}[.,]\\d{3})");
-    private static final Pattern PVOIL_DIESEL = Pattern.compile("(?i)DO\\s*0[.,]05S[^0-9]{0,40}?(\\d{2}[.,]\\d{3})");
-    private static final Pattern PVOIL_PRICE_LIST = Pattern.compile("(\\d{2}[.,]\\d{3})\\s*(?:đ|d)?\\b");
+    // ---- webgia.com — Vang ----
+    private static final String WEBGIA_GOLD_SJC = "https://webgia.com/gia-vang/sjc/";
+    private static final String WEBGIA_GOLD = "https://webgia.com/gia-vang/";
+    private static final String WEBGIA_GOLD_WORLD = "https://webgia.com/gia-vang-the-gioi/";
+    private static final String WEBGIA_HOME = "https://webgia.com/";
+    // Vang SJC: "Vang SJC 1L, 10L, 1KG 13.500.000 13.800.000" (dong/chi, 2 so co 2 dau cham)
+    private static final Pattern WEBGIA_SJC = Pattern.compile("(?i)Vàng SJC 1L.{0,160}?(\\d{2}[.,]\\d{3}[.,]\\d{3})\\s+(\\d{2}[.,]\\d{3}[.,]\\d{3})", Pattern.DOTALL);
+    private static final Pattern WEBGIA_SJC_HOME = Pattern.compile("(?i)SJC.{0,80}?(\\d{2}[.,]\\d{3}[.,]\\d{3})\\s+(\\d{2}[.,]\\d{3}[.,]\\d{3})", Pattern.DOTALL);
+    // Nhan: "Vang nhan SJC 99,99% ... 13.380.000 13.780.000"
+    private static final Pattern WEBGIA_NHAN = Pattern.compile("(?i)Vàng nhẫn SJC.{0,200}?(\\d{2}[.,]\\d{3}[.,]\\d{3})\\s+(\\d{2}[.,]\\d{3}[.,]\\d{3})", Pattern.DOTALL);
+    // Vang the gioi: "3,895.09 USD" / "3.895 USD" / "3,895 USD"
+    private static final Pattern WEBGIA_WORLD = Pattern.compile("(?i)(\\d[.,]\\d{3}[.,]\\d{2}|\\d[.,]\\d{3})\\s*USD", Pattern.DOTALL);
+    private static final Pattern WEBGIA_WORLD2 = Pattern.compile("(?i)XAU.{0,200}?(\\d[.,]\\d{3}[.,]\\d{2})", Pattern.DOTALL);
 
-    // ---- Vang giavang.net ----
-    private static final String GIAVANG_URL = "https://giavang.net/";
-    private static final Pattern GIAVANG_ARTICLE_LINK = Pattern.compile("href\\s*=\\s*\"([^\"]*gia-vang[^\"]*)\"", Pattern.CASE_INSENSITIVE);
-    private static final Pattern GIAVANG_SJC_TABLE = Pattern.compile("(?i)SJC\\s*1\\s*L[^0-9]{0,80}?(\\d{2,3}[.,]\\d{3})[^0-9]{0,80}?(\\d{2,3}[.,]\\d{3})");
-    private static final Pattern GIAVANG_NHAN_TABLE = Pattern.compile("(?i)NHAN\\s*SJC[^0-9]{0,80}?(\\d{2,3}[.,]\\d{3})[^0-9]{0,80}?(\\d{2,3}[.,]\\d{3})");
-    private static final Pattern GIAVANG_WORLD_TABLE = Pattern.compile("(?i)XAUUSD[^0-9]{0,80}?(\\d[.,]\\d{3})");
-
-    // ---- Vang (dung chung cho bai giavang.net + fallback VnExpress) ----
-    // SJC mieng: "SJC ... 135,0 - 138,0 trieu" / "SJC ... 135 - 138 trieu"
-    private static final Pattern SJC = Pattern.compile("(?i)vàng miếng.{0,200}?(?:tại\\s*)?(\\d[\\d.,]+)\\s*-\\s*(\\d[\\d.,]+)\\s*triệu", Pattern.DOTALL);
-    private static final Pattern SJC_SIMPLE = Pattern.compile("(?i)SJC.{0,200}?(\\d{2,3}[.,]\\d)\\s*-\\s*(\\d{2,3}[.,]\\d)\\s*triệu", Pattern.DOTALL);
-    private static final Pattern SJC_SIMPLE2 = Pattern.compile("(?i)SJC.{0,200}?(\\d{3})\\s*-\\s*(\\d{3})\\s*triệu", Pattern.DOTALL);
-    private static final Pattern NHAN_SJC = Pattern.compile("(?i)(?:SJC.{0,250}?nhẫn tròn|nhẫn tròn.{0,250}?SJC).{0,250}?(?:tại|quanh|còn|mức|về)\\s*(\\d[\\d.,]+)\\s*-\\s*(\\d[\\d.,]+)\\s*triệu", Pattern.DOTALL);
-    private static final Pattern NHAN_GENERIC = Pattern.compile("(?i)nhẫn tròn.{0,300}?(?:tại|quanh|còn|mức|về)\\s*(\\d[\\d.,]+)\\s*-\\s*(\\d[\\d.,]+)\\s*triệu", Pattern.DOTALL);
-    private static final Pattern NHAN_SJC_SIMPLE = Pattern.compile("(?i)nhẫn SJC.{0,200}?(\\d{2,3}[.,]\\d)\\s*-\\s*(\\d{2,3}[.,]\\d)", Pattern.DOTALL);
-    private static final Pattern WORLD_GOLD = Pattern.compile("(?i)(?:vàng thế giới giao ngay|giá vàng giao ngay|vàng thế giới).{0,220}?(?:còn|về|lên|xuống|đạt|dưới vùng)\\s*(?:còn|sát|gần)?\\s*(\\d[\\d.,]+)\\s*USD", Pattern.DOTALL);
-    private static final Pattern WORLD_GOLD_SIMPLE = Pattern.compile("(?i)(\\d[.,]\\d{3})\\s*USD", Pattern.DOTALL);
-
-    // ---- Xang fallback VnExpress (chi khi PVOIL loi) ----
-    private static final Pattern ITEM = Pattern.compile("<item>(.*?)</item>", Pattern.DOTALL);
-    private static final Pattern TITLE = Pattern.compile("<title>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</title>", Pattern.DOTALL);
-    private static final Pattern LINK = Pattern.compile("<link>(.*?)</link>", Pattern.DOTALL);
-    private static final Pattern PUBDATE = Pattern.compile("<pubDate>(.*?)</pubDate>", Pattern.DOTALL);
-    private static final Pattern DATE_FROM_URL = Pattern.compile("-(\\d{1,2})-(\\d{1,2})-\\d+\\.html");
-    private static final Pattern DATE_FROM_PUBDATE = Pattern.compile("(\\d{1,2})\\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d{4}");
     private static final Pattern SCRIPT_STYLE_PATTERN = Pattern.compile("(?s)<script.*?</script>|<style.*?</style>");
     private static final Pattern HTML_TAG_PATTERN = Pattern.compile("<[^>]+>");
     private static final Pattern WHITESPACE_PATTERN = Pattern.compile("\\s+");
-    private static final Pattern FUEL_TABLE = Pattern.compile("(?i)E10\\s?RON\\s?95-III\\s*,\\s*([\\d.]+)\\s*đ/lít.*?E5\\s?RON\\s?92\\s*,\\s*([\\d.]+)\\s*đ/lít.*?Diesel\\s*,\\s*([\\d.]+)\\s*đ/lít", Pattern.DOTALL);
-    private static final Pattern FUEL_E10_BODY = Pattern.compile("(?i)E10\\s?RON\\s?95-III.{0,180}?(?:xuống|lên|ở mức|còn)\\s*([\\d.]+)\\s*đồng", Pattern.DOTALL);
-    private static final Pattern FUEL_E5_BODY = Pattern.compile("(?i)E5\\s?RON\\s?92.{0,180}?(?:còn|ở mức|xuống|lên)\\s*([\\d.]+)\\s*đồng", Pattern.DOTALL);
-    private static final Pattern FUEL_DIESEL_BODY = Pattern.compile("(?i)diesel.{0,180}?(?:giá mới|có giá mới|ở mức)\\s*([\\d.]+)\\s*đồng", Pattern.DOTALL);
 
     private static final long DATA_TTL_MS = 2 * 60 * 60 * 1000L;
     private static final long EMPTY_RETRY_MS = 2 * 60 * 1000L;
@@ -159,110 +149,100 @@ public final class MarketService {
     }
 
     private static Market fetch() throws Exception {
-        // 1. XANG: PVOIL truoc
-        Market pvoil = null;
-        try { pvoil = fetchPvoilFuel(); } catch (Exception ignored) {}
-        // 2. VANG: giavang.net truoc
-        Market gv = null;
-        try { gv = fetchGiavangGold(); } catch (Exception ignored) {}
+        Market fuel = null;
+        try { fuel = fetchWebgiaFuel(); } catch (Exception ignored) {}
+        Market gold = null;
+        try { gold = fetchWebgiaGold(); } catch (Exception ignored) {}
 
-        String e5 = (pvoil != null) ? pvoil.e5 : null;
-        String e10 = (pvoil != null) ? pvoil.e10 : null;
-        String diesel = (pvoil != null) ? pvoil.diesel : null;
-        String fuelDate = (pvoil != null) ? pvoil.date : "";
-
-        String sjcBuy = (gv != null) ? gv.sjcBuy : null;
-        String sjcSell = (gv != null) ? gv.sjcSell : null;
-        String nhanBuy = (gv != null) ? gv.nhanBuy : null;
-        String nhanSell = (gv != null) ? gv.nhanSell : null;
-        String worldGold = (gv != null) ? gv.worldGold : null;
-        String goldDate = (gv != null) ? gv.date : "";
-
-        // 3. Fallback VnExpress chi cho phan nao con thieu, de khong ve Updating...
-        if (e5 == null || sjcBuy == null) {
-            try {
-                Market vx = fetchVnExpressFallback(e5 == null, sjcBuy == null);
-                if (e5 == null && vx.e5 != null) {
-                    e5 = vx.e5; e10 = vx.e10; diesel = vx.diesel;
-                    if (fuelDate.isEmpty()) fuelDate = vx.date;
-                }
-                if (sjcBuy == null && vx.sjcBuy != null) {
-                    sjcBuy = vx.sjcBuy; sjcSell = vx.sjcSell;
-                    nhanBuy = vx.nhanBuy; nhanSell = vx.nhanSell;
-                    worldGold = vx.worldGold;
-                    if (goldDate.isEmpty()) goldDate = vx.date;
-                }
-            } catch (Exception ignored) {}
-        }
-
-        if (e5 == null && sjcBuy == null) {
-            throw new IllegalStateException("Khong lay duoc PVOIL + giavang.net + VnExpress");
+        if (fuel == null && gold == null) {
+            throw new IllegalStateException("Khong lay duoc webgia.com xang + vang");
         }
 
         Market base = (cachedMarket != null && !cachedMarket.empty) ? cachedMarket : null;
         Market m = new Market();
-        m.e5 = (e5 != null) ? e5 : (base != null ? base.e5 : NO_DATA);
-        m.e10 = (e10 != null) ? e10 : (base != null ? base.e10 : NO_DATA);
-        m.diesel = (diesel != null) ? diesel : (base != null ? base.diesel : NO_DATA);
-        m.sjcBuy = (sjcBuy != null) ? sjcBuy : (base != null ? base.sjcBuy : NO_DATA);
-        m.sjcSell = (sjcSell != null) ? sjcSell : (base != null ? base.sjcSell : NO_DATA);
-        m.nhanBuy = (nhanBuy != null) ? nhanBuy : (base != null ? base.nhanBuy : NO_DATA);
-        m.nhanSell = (nhanSell != null) ? nhanSell : (base != null ? base.nhanSell : NO_DATA);
-        m.worldGold = (worldGold != null) ? worldGold : (base != null ? base.worldGold : NO_DATA);
-        m.date = !goldDate.isEmpty() ? goldDate : (!fuelDate.isEmpty() ? fuelDate : (base != null ? base.date : "--/--"));
-        // Ghi ro nguon de ban kiem tra: xang tu PVOIL, vang tu giavang.net
-        if (pvoil != null && gv != null) m.source = "PVOIL / GiaVang.Net";
-        else if (pvoil != null) m.source = "PVOIL / VnExpress";
-        else if (gv != null) m.source = "VnExpress / GiaVang.Net";
-        else m.source = "VnExpress";
+        m.e5 = (fuel != null && fuel.e5 != null) ? fuel.e5 : (base != null ? base.e5 : NO_DATA);
+        m.e10 = (fuel != null && fuel.e10 != null) ? fuel.e10 : (base != null ? base.e10 : NO_DATA);
+        m.diesel = (fuel != null && fuel.diesel != null) ? fuel.diesel : (base != null ? base.diesel : NO_DATA);
+        m.sjcBuy = (gold != null && gold.sjcBuy != null) ? gold.sjcBuy : (base != null ? base.sjcBuy : NO_DATA);
+        m.sjcSell = (gold != null && gold.sjcSell != null) ? gold.sjcSell : (base != null ? base.sjcSell : NO_DATA);
+        m.nhanBuy = (gold != null && gold.nhanBuy != null) ? gold.nhanBuy : (base != null ? base.nhanBuy : NO_DATA);
+        m.nhanSell = (gold != null && gold.nhanSell != null) ? gold.nhanSell : (base != null ? base.nhanSell : NO_DATA);
+        m.worldGold = (gold != null && gold.worldGold != null) ? gold.worldGold : (base != null ? base.worldGold : NO_DATA);
+        String d = "";
+        if (gold != null && gold.date != null && !gold.date.isEmpty() && !gold.date.equals("--/--")) d = gold.date;
+        else if (fuel != null && fuel.date != null && !fuel.date.isEmpty()) d = fuel.date;
+        else if (base != null) d = base.date;
+        else d = "--/--";
+        m.date = d;
+        m.source = "WebGia.com";
         m.sample = false;
         m.empty = false;
         return m;
     }
 
-    // ---------------- XANG PVOIL ----------------
-    private static Market fetchPvoilFuel() {
-        String html = null;
-        String[] urls = new String[]{PVOIL_FUEL_URL, PVOIL_FUEL_URL_NOWWW, PVOIL_FUEL_URL + "/"};
+    // ---------------- XANG — webgia.com ----------------
+    private static Market fetchWebgiaFuel() {
+        // 1. Trang hien tai
+        String[] urls = new String[]{WEBGIA_FUEL_PETROLIMEX, WEBGIA_FUEL};
         for (String u : urls) {
             try {
-                html = get(u);
-                if (html != null && html.length() > 1000) break;
+                String html = get(u);
+                Market m = parseFuelText(html);
+                if (m != null) return m;
             } catch (Exception ignored) {}
         }
-        if (html == null) return null;
-        String text = stripHtml(html);
-        // Cach 1: match theo ten — dung cho bang 12/11: "Xang E10 RON 95-III 19.840 d -1310"
-        String e10 = firstGroup(PVOIL_E10, text);
-        String e5 = firstGroup(PVOIL_E5, text);
-        String diesel = firstGroup(PVOIL_DIESEL, text);
-        if (isValidFuel(e10) && isValidFuel(e5) && isValidFuel(diesel)) {
-            Market m = new Market();
-            m.e10 = e10.replace(',', '.');
-            m.e5 = e5.replace(',', '.');
-            m.diesel = diesel.replace(',', '.');
-            m.date = pvoilDate(text);
-            return m;
-        }
-        // Cach 2: theo thu tu bang PVOIL: 1 E10, 2 E5, 3 DO 0,05S, 4 DO 0,001S
-        // Lay 4 gia dau tien dang 19.840, bo qua chenh lech -1310 (khong co dau cham)
+        // 2. Trang lich su theo ngay (trang hien tai doi khi load bang JS nen khong co bang trong HTML).
+        // Thu 14 ngay gan nhat: vd https://webgia.com/gia-xang-dau/petrolimex/2026-11-12.html
         try {
-            Matcher pm = PVOIL_PRICE_LIST.matcher(text);
-            ArrayList<String> prices = new ArrayList<>();
-            while (pm.find() && prices.size() < 4) {
-                String v = pm.group(1).replace(',', '.');
-                if (isValidFuel(v) && !prices.contains(v)) prices.add(v);
-            }
-            if (prices.size() >= 3) {
-                Market m = new Market();
-                m.e10 = prices.get(0);
-                m.e5 = prices.get(1);
-                m.diesel = prices.get(2);
-                m.date = pvoilDate(text);
-                return m;
+            Calendar cal = Calendar.getInstance();
+            for (int i = 0; i < 14; i++) {
+                int y = cal.get(Calendar.YEAR);
+                int mo = cal.get(Calendar.MONTH) + 1;
+                int da = cal.get(Calendar.DAY_OF_MONTH);
+                String ds = String.format("%04d-%02d-%02d", y, mo, da);
+                String url = "https://webgia.com/gia-xang-dau/petrolimex/" + ds + ".html";
+                try {
+                    String html = get(url);
+                    Market m = parseFuelText(html);
+                    if (m != null) return m;
+                } catch (Exception ignored) {}
+                cal.add(Calendar.DAY_OF_MONTH, -1);
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    // Parse ca HTML tho (giu script) + text da strip, vi bang webgia doi khi nam trong script/JSON
+    private static Market parseFuelText(String html) {
+        if (html == null) return null;
+        // A. Text da strip (bang HTML binh thuong)
+        Market m = parseFuelFromText(stripHtml(html));
+        if (m != null) return m;
+        // B. HTML tho: thay tag bang space nhung GIU script (bang co the nam trong JSON)
+        try {
+            String raw = HTML_TAG_PATTERN.matcher(html).replaceAll(" ");
+            raw = decodeHtmlEntities(raw);
+            raw = normalizeText(raw);
+            Market m2 = parseFuelFromText(raw);
+            if (m2 != null) return m2;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static Market parseFuelFromText(String text) {
+        if (text == null) return null;
+        String e10 = firstGroup(WEBGIA_E10, text);
+        if (e10 == null) e10 = firstGroup(WEBGIA_E10_ANY, text);
+        String e5 = firstGroup(WEBGIA_E5, text);
+        String diesel = firstGroup(WEBGIA_DIESEL, text);
+        if (diesel == null) diesel = firstGroup(WEBGIA_DIESEL2, text);
+        if (!isValidFuel(e10) || !isValidFuel(e5) || !isValidFuel(diesel)) return null;
+        Market m = new Market();
+        m.e10 = e10.replace(',', '.');
+        m.e5 = e5.replace(',', '.');
+        m.diesel = diesel.replace(',', '.');
+        m.date = webgiaDate(text);
+        return m;
     }
 
     private static boolean isValidFuel(String v) {
@@ -273,195 +253,126 @@ public final class MarketService {
         } catch (Exception e) { return false; }
     }
 
-    private static String pvoilDate(String text) {
-        String d = firstGroup(PVOIL_DATE, text);
+    private static String webgiaDate(String text) {
+        String d = firstGroup(WEBGIA_DATE, text);
         if (d == null) return "--/--";
         String[] pp = d.split("/");
         try { return Integer.parseInt(pp[0]) + "/" + Integer.parseInt(pp[1]); } catch (Exception e) { return d; }
     }
 
-    // ---------------- VANG GIAVANG.NET ----------------
-    private static Market fetchGiavangGold() {
-        String home = null;
-        try { home = get(GIAVANG_URL); } catch (Exception ignored) {}
-        if (home == null) return null;
-
-        // A. Thu bai viet moi nhat tren giavang.net (vd: "Gia vang sang 13/11: SJC 135,0 - 138,0 trieu")
-        try {
-            Matcher lm = GIAVANG_ARTICLE_LINK.matcher(home);
-            ArrayList<String> links = new ArrayList<>();
-            while (lm.find() && links.size() < 5) {
-                String href = lm.group(1);
-                if (href.startsWith("/")) href = "https://giavang.net" + href;
-                else if (!href.startsWith("http")) href = "https://giavang.net/" + href;
-                if (!links.contains(href)) links.add(href);
-            }
-            for (String link : links) {
+    // ---------------- VANG — webgia.com ----------------
+    private static Market fetchWebgiaGold() {
+        String sjcHtml = null;
+        try { sjcHtml = get(WEBGIA_GOLD_SJC); } catch (Exception ignored) {}
+        if (sjcHtml != null) {
+            Market m = parseGoldSjcPage(sjcHtml);
+            if (m != null) {
+                // Vang the gioi: thu trang rieng, neu khong co thi giu NO_DATA chu khong fail ca vang
                 try {
-                    String article = stripHtml(get(link));
-                    Market m = parseGoldText(article);
-                    if (m != null) {
-                        // Ngay tu bai viet: tim "13/11" trong text, neu khong co thi de "--/--"
-                        Matcher dm = Pattern.compile("(\\d{1,2}/\\d{1,2})").matcher(article);
-                        if (dm.find()) m.date = dm.group(1);
-                        return m;
-                    }
+                    String wHtml = get(WEBGIA_GOLD_WORLD);
+                    String w = parseWorldGold(wHtml);
+                    if (w != null) m.worldGold = w;
                 } catch (Exception ignored) {}
+                if (m.worldGold == null) {
+                    try {
+                        String w2 = parseWorldGold(sjcHtml);
+                        if (w2 != null) m.worldGold = w2;
+                    } catch (Exception ignored) {}
+                }
+                if (m.worldGold == null) m.worldGold = NO_DATA;
+                return m;
             }
-        } catch (Exception ignored) {}
-
-        // B. Thu bang gia tren trang chu giavang.net
-        try {
-            String text = stripHtml(home);
-            Market m = parseGoldTable(text);
-            if (m != null) return m;
-            // C. Thu trong HTML tho (JSON trong script) — so dang 135000000
-            Market m2 = parseGoldRawNumbers(home);
-            if (m2 != null) return m2;
-        } catch (Exception ignored) {}
+        }
+        // Fallback trong webgia: trang tong + trang chu
+        String[] fallbacks = new String[]{WEBGIA_GOLD, WEBGIA_HOME};
+        for (String u : fallbacks) {
+            try {
+                String html = get(u);
+                Market m = parseGoldSjcPage(html);
+                if (m != null) {
+                    if (m.worldGold == null) m.worldGold = NO_DATA;
+                    return m;
+                }
+                Market m2 = parseGoldHomeTable(html);
+                if (m2 != null) {
+                    if (m2.worldGold == null) m2.worldGold = NO_DATA;
+                    return m2;
+                }
+            } catch (Exception ignored) {}
+        }
         return null;
     }
 
-    // Parse kieu "135,0 - 138,0 trieu" trong bai viet
-    private static Market parseGoldText(String text) {
-        if (text == null) return null;
-        String sjcBuy = null, sjcSell = null;
-        Matcher ms = SJC.matcher(text);
-        if (ms.find()) { sjcBuy = ms.group(1); sjcSell = ms.group(2); }
+    private static Market parseGoldSjcPage(String html) {
+        if (html == null) return null;
+        String text = stripHtml(html);
+        // SJC 1L: 13.500.000 13.800.000 (dong/chi)
+        Matcher ms = WEBGIA_SJC.matcher(text);
+        String buyRaw = null, sellRaw = null;
+        if (ms.find()) { buyRaw = ms.group(1); sellRaw = ms.group(2); }
         else {
-            Matcher ms2 = SJC_SIMPLE.matcher(text);
-            if (ms2.find()) { sjcBuy = ms2.group(1); sjcSell = ms2.group(2); }
-            else {
-                Matcher ms3 = SJC_SIMPLE2.matcher(text);
-                if (ms3.find()) { sjcBuy = ms3.group(1); sjcSell = ms3.group(2); }
-            }
+            // Thu trong HTML tho (JSON/script)
+            try {
+                String raw = normalizeText(decodeHtmlEntities(HTML_TAG_PATTERN.matcher(html).replaceAll(" ")));
+                Matcher ms2 = WEBGIA_SJC.matcher(raw);
+                if (ms2.find()) { buyRaw = ms2.group(1); sellRaw = ms2.group(2); text = raw; }
+            } catch (Exception ignored) {}
         }
-        if (sjcBuy == null) return null;
-        String nhanBuy = null, nhanSell = null;
-        Matcher mn = NHAN_SJC.matcher(text);
-        if (mn.find()) { nhanBuy = mn.group(1); nhanSell = mn.group(2); }
-        else {
-            Matcher mn2 = NHAN_GENERIC.matcher(text);
-            if (mn2.find()) { nhanBuy = mn2.group(1); nhanSell = mn2.group(2); }
-            else {
-                Matcher mn3 = NHAN_SJC_SIMPLE.matcher(text);
-                if (mn3.find()) { nhanBuy = mn3.group(1); nhanSell = mn3.group(2); }
-            }
-        }
-        String world = null;
-        Matcher mw = WORLD_GOLD.matcher(text);
-        if (mw.find()) world = mw.group(1);
-        else {
-            Matcher mw2 = WORLD_GOLD_SIMPLE.matcher(text);
-            if (mw2.find()) world = mw2.group(1);
-        }
+        if (buyRaw == null) return null;
         Market m = new Market();
-        m.sjcBuy = sjcBuy; m.sjcSell = sjcSell;
-        m.nhanBuy = (nhanBuy != null) ? nhanBuy : NO_DATA;
-        m.nhanSell = (nhanSell != null) ? nhanSell : NO_DATA;
-        m.worldGold = (world != null) ? world : NO_DATA;
-        m.date = "--/--";
+        m.sjcBuy = chiToTrieu(buyRaw);
+        m.sjcSell = chiToTrieu(sellRaw);
+        // Nhan SJC: 13.380.000 13.780.000
+        Matcher mn = WEBGIA_NHAN.matcher(text);
+        if (mn.find()) {
+            m.nhanBuy = chiToTrieu(mn.group(1));
+            m.nhanSell = chiToTrieu(mn.group(2));
+        } else {
+            m.nhanBuy = NO_DATA;
+            m.nhanSell = NO_DATA;
+        }
+        m.date = webgiaDate(text);
+        m.worldGold = null;
         return m;
     }
 
-    // Parse bang: "SJC 1 LUONG 135,000 138,000" -> 135,0 / 138,0
-    private static Market parseGoldTable(String text) {
-        Matcher ms = GIAVANG_SJC_TABLE.matcher(text);
+    private static Market parseGoldHomeTable(String html) {
+        if (html == null) return null;
+        String text = stripHtml(html);
+        Matcher ms = WEBGIA_SJC_HOME.matcher(text);
         if (!ms.find()) return null;
         Market m = new Market();
-        m.sjcBuy = toTrieu(ms.group(1));
-        m.sjcSell = toTrieu(ms.group(2));
-        Matcher mn = GIAVANG_NHAN_TABLE.matcher(text);
-        if (mn.find()) { m.nhanBuy = toTrieu(mn.group(1)); m.nhanSell = toTrieu(mn.group(2)); }
-        else { m.nhanBuy = NO_DATA; m.nhanSell = NO_DATA; }
-        Matcher mw = GIAVANG_WORLD_TABLE.matcher(text);
-        m.worldGold = mw.find() ? mw.group(1) : NO_DATA;
-        m.date = "--/--";
+        m.sjcBuy = chiToTrieu(ms.group(1));
+        m.sjcSell = chiToTrieu(ms.group(2));
+        m.nhanBuy = NO_DATA;
+        m.nhanSell = NO_DATA;
+        m.date = webgiaDate(text);
+        m.worldGold = null;
         return m;
     }
 
-    private static Market parseGoldRawNumbers(String raw) {
-        // Tim so dang 135000000 (VND/luong) trong JSON cua trang
-        try {
-            Matcher m = Pattern.compile("135\\d{6}").matcher(raw);
-            if (m.find()) {
-                Market mk = new Market();
-                mk.sjcBuy = "135,0";
-                mk.sjcSell = "138,0";
-                mk.nhanBuy = "133,8";
-                mk.nhanSell = "137,8";
-                mk.worldGold = NO_DATA;
-                mk.date = "--/--";
-                return null; // khong doan mo, tra null de fallback VnExpress lo
-            }
-        } catch (Exception ignored) {}
+    private static String parseWorldGold(String html) {
+        if (html == null) return null;
+        String text = stripHtml(html);
+        Matcher mw = WEBGIA_WORLD.matcher(text);
+        if (mw.find()) return mw.group(1).replace(',', '.');
+        Matcher mw2 = WEBGIA_WORLD2.matcher(text);
+        if (mw2.find()) return mw2.group(1).replace(',', '.');
         return null;
     }
 
-    // "135,000" (nghin/luong) -> "135,0" (trieu/luong). "135,0" giu nguyen.
-    private static String toTrieu(String v) {
+    // "13.500.000" dong/chi -> "135,0" trieu/luong. "13.380.000" -> "133,8".
+    private static String chiToTrieu(String v) {
         if (v == null) return NO_DATA;
-        v = v.trim().replace(',', '.');
         try {
-            double d = Double.parseDouble(v);
-            if (d > 1000) return String.format("%.1f", d / 1000.0).replace('.', ',');
-            return v.replace('.', ',');
-        } catch (Exception e) { return v; }
-    }
-
-    // ---------------- FALLBACK VNEXPRESS (chi khi PVOIL / giavang.net loi) ----------------
-    private static Market fetchVnExpressFallback(boolean needFuel, boolean needGold) throws Exception {
-        String rss = get(RSS_URL);
-        Matcher items = ITEM.matcher(rss);
-        String e5 = null, e10 = null, diesel = null, fuelDate = "";
-        String sjcBuy = null, sjcSell = null, nhanBuy = null, nhanSell = null, worldGold = null, goldDate = "";
-        while (items.find() && ((needFuel && e5 == null) || (needGold && sjcBuy == null))) {
-            String item = items.group(1);
-            String title = firstGroup(TITLE, item);
-            String link = firstGroup(LINK, item);
-            if (link == null) continue;
-            String linkLower = link.toLowerCase();
-            boolean isFuel = linkLower.contains("gia-xang");
-            boolean isGold = linkLower.contains("gia-vang");
-            if (!isFuel && !isGold) {
-                if (title != null && title.contains("Giá xăng")) isFuel = true;
-                else if (title != null && (title.contains("Giá vàng") || title.contains("Vàng miếng"))) isGold = true;
-                else continue;
-            }
-            String dateForThis = dateFromLink(link);
-            if (dateForThis.isEmpty()) dateForThis = dateFromPubDate(firstGroup(PUBDATE, item));
-            if (isFuel && needFuel && e5 == null) {
-                try {
-                    String text = stripHtml(get(link.trim()));
-                    Matcher table = FUEL_TABLE.matcher(text);
-                    if (table.find()) {
-                        e10 = table.group(1); e5 = table.group(2); diesel = table.group(3); fuelDate = dateForThis;
-                    } else {
-                        String pE10 = firstGroup(FUEL_E10_BODY, text);
-                        String pE5 = firstGroup(FUEL_E5_BODY, text);
-                        String pDiesel = firstGroup(FUEL_DIESEL_BODY, text);
-                        if (pE10 != null && pE5 != null && pDiesel != null) {
-                            e10 = pE10; e5 = pE5; diesel = pDiesel; fuelDate = dateForThis;
-                        }
-                    }
-                } catch (Exception ignored) {}
-            } else if (isGold && needGold && sjcBuy == null) {
-                try {
-                    String text = stripHtml(get(link.trim()));
-                    Market gm = parseGoldText(text);
-                    if (gm != null) {
-                        sjcBuy = gm.sjcBuy; sjcSell = gm.sjcSell;
-                        nhanBuy = gm.nhanBuy; nhanSell = gm.nhanSell;
-                        worldGold = gm.worldGold; goldDate = dateForThis;
-                    }
-                } catch (Exception ignored) {}
-            }
+            String clean = v.trim().replace(".", "").replace(",", "");
+            double dongPerChi = Double.parseDouble(clean);
+            double trieuPerLuong = dongPerChi / 100000.0;
+            String s = String.format("%.1f", trieuPerLuong);
+            return s.replace('.', ',');
+        } catch (Exception e) {
+            return NO_DATA;
         }
-        Market m = new Market();
-        m.e5 = e5; m.e10 = e10; m.diesel = diesel;
-        m.sjcBuy = sjcBuy; m.sjcSell = sjcSell; m.nhanBuy = nhanBuy; m.nhanSell = nhanSell; m.worldGold = worldGold;
-        m.date = !goldDate.isEmpty() ? goldDate : fuelDate;
-        return m;
     }
 
     public static Market empty() {
@@ -469,7 +380,7 @@ public final class MarketService {
         m.sample = false;
         m.empty = true;
         m.date = "--/--";
-        m.source = "PVOIL / GiaVang.Net";
+        m.source = "WebGia.com";
         m.e5 = NO_DATA; m.e10 = NO_DATA; m.diesel = NO_DATA;
         m.sjcBuy = NO_DATA; m.sjcSell = NO_DATA;
         m.nhanBuy = NO_DATA; m.nhanSell = NO_DATA; m.worldGold = NO_DATA;
@@ -479,38 +390,6 @@ public final class MarketService {
     @Deprecated
     public static Market sample() {
         return empty();
-    }
-
-    private static String dateFromLink(String link) {
-        Matcher m = DATE_FROM_URL.matcher(link);
-        return m.find() ? m.group(1) + "/" + m.group(2) : "";
-    }
-
-    private static String dateFromPubDate(String pubDate) {
-        if (pubDate == null) return "";
-        Matcher m = DATE_FROM_PUBDATE.matcher(pubDate);
-        if (!m.find()) return "";
-        int month = monthToNumber(m.group(2));
-        return month == 0 ? "" : m.group(1) + "/" + month;
-    }
-
-    private static int monthToNumber(String mon) {
-        if (mon == null) return 0;
-        switch (mon) {
-            case "Jan": return 1;
-            case "Feb": return 2;
-            case "Mar": return 3;
-            case "Apr": return 4;
-            case "May": return 5;
-            case "Jun": return 6;
-            case "Jul": return 7;
-            case "Aug": return 8;
-            case "Sep": return 9;
-            case "Oct": return 10;
-            case "Nov": return 11;
-            case "Dec": return 12;
-            default: return 0;
-        }
     }
 
     private static String stripHtml(String html) {
