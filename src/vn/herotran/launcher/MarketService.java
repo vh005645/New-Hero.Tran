@@ -21,22 +21,22 @@ import java.util.zip.GZIPInputStream;
  * NGUON DUY NHAT: webgia.com — theo yeu cau nguoi dung.
  *   Xang:  https://webgia.com/gia-xang-dau/petrolimex/
  *          + trang lich su theo ngay https://webgia.com/gia-xang-dau/petrolimex/YYYY-MM-DD.html
- *          (trang hien tai doi khi load bang bang JS nen phai thu them trang ngay)
- *   Vang:  https://webgia.com/gia-vang/sjc/
- *          + https://webgia.com/gia-vang/
- *          + https://webgia.com/gia-vang-the-gioi/ (vang the gioi)
+ *   Vang:  https://webgia.com/gia-vang/sjc/ + https://webgia.com/gia-vang-the-gioi/
  *
- * QUAN TRONG — Dinh dang webgia.com khac han PVOIL / VnExpress:
- *   - Vang SJC: don vi DONG/CHI, vd "Vang SJC 1L 13.500.000 13.800.000"
- *     => 13.500.000 dong/chi = 135,0 trieu/luong (1 luong = 10 chi).
- *     Phai chia 100.000, khong duoc lay thang 13.500.000 lam trieu.
- *   - Vang nhan SJC: "Vang nhan SJC 99,99% 13.380.000 13.780.000" => 133,8 / 137,8 trieu/luong.
- *   - Xang webgia: bang Petrolimex co 2 cot Vung 1 / Vung 2, vd "E5 RON 92-II 19.840 20.230".
- *     Lay cot dau tien (Vung 1) = 19.840, khong lay cot Vung 2.
- *   - Xang hien tai dung (12/11/2026 15:00): E10 19.840, E5 19.390, DO 0,05S 26.820.
- *   - Vang hien tai dung (13/11/2026): SJC 135,0 - 138,0, nhan 133,8 - 137,8, the gioi ~3.895 USD.
+ * CAU HINH RIENG CUA BAN (QUAN TRONG, DUNG DOI):
+ *   - Khu vuc: VUNG 1 (lay cot gia dau tien, khong lay cot Vung 2)
+ *   - Xang ban dung: E10 RON 95 MUC 3 = E10 RON 95-III
+ *     Hien tai (12/11/2026 15:00, Vung 1): E10 RON 95-III = 19.840
+ *     KHONG PHAI Muc 5: E10 RON 95-V = 21.840 (Vung 1) / 22.270 (Vung 2)
+ *   - Loi ban truoc: code co fallback "E10 RON 95" chung chung, neu khong khop III
+ *     thi no se trung dong V dau tien trong bang va tra 21.840 (Muc 5).
+ *     Ban nay DA BO HOAN TOAN fallback Muc 5, chi khop III / Muc 3.
  *
- * Khi khong lay duoc thi tat ca cac cot deu la "Updating..." (duy nhat).
+ * Vang webgia: don vi DONG/CHI, vd "Vang SJC 1L 13.500.000 13.800.000"
+ *   => 13.500.000 dong/chi = 135,0 trieu/luong. Phai chia 100.000.
+ * Xang webgia: bang Petrolimex co 2 cot Vung 1 / Vung 2, lay cot dau (Vung 1).
+ *
+ * Khi khong lay duoc thi tat ca cac cot deu la "Updating...".
  */
 public final class MarketService {
 
@@ -46,9 +46,13 @@ public final class MarketService {
     // ---- webgia.com — Xang ----
     private static final String WEBGIA_FUEL_PETROLIMEX = "https://webgia.com/gia-xang-dau/petrolimex/";
     private static final String WEBGIA_FUEL = "https://webgia.com/gia-xang-dau/";
-    // Xang webgia: "E10 RON 95-III ... 19.840" — lay so dau tien sau ten (Vung 1)
-    private static final Pattern WEBGIA_E10 = Pattern.compile("(?i)E10\\s*RON\\s*95-III.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
-    private static final Pattern WEBGIA_E10_ANY = Pattern.compile("(?i)E10\\s*RON\\s*95.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    // CHI KHOP MUC 3 (III), KHONG KHOP MUC 5 (V). Ho tro cac cach viet:
+    // "95-III", "95 - III", "95 III", "95 Muc 3", "95 MỨC 3", "95–III"
+    private static final Pattern WEBGIA_E10_MUC3 = Pattern.compile("(?i)E10\\s*RON\\s*95\\s*[-\\u2013\\u2014]?\\s*III\\b.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    private static final Pattern WEBGIA_E10_MUC3_V2 = Pattern.compile("(?i)E10\\s*RON\\s*95\\s*(?:M[\\u1ee9u]c|MUC)\\s*3\\b.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    private static final Pattern WEBGIA_E10_MUC3_V3 = Pattern.compile("(?i)E10.{0,60}?95-III.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
+    // Cam lay Muc 5: pattern nay chi de kiem tra / loai bo, khong dung de lay gia E10
+    // E5 va Dau da la II nen khong bi nham V
     private static final Pattern WEBGIA_E5 = Pattern.compile("(?i)E5\\s*RON\\s*92.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
     private static final Pattern WEBGIA_DIESEL = Pattern.compile("(?i)DO\\s*0[.,]05S.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
     private static final Pattern WEBGIA_DIESEL2 = Pattern.compile("(?i)(?:Dầu|Dau)\\s*(?:DO|điêzen|diezen)?\\s*0[.,]05S.{0,160}?(\\d{2}[.,]\\d{3})", Pattern.DOTALL);
@@ -59,12 +63,9 @@ public final class MarketService {
     private static final String WEBGIA_GOLD = "https://webgia.com/gia-vang/";
     private static final String WEBGIA_GOLD_WORLD = "https://webgia.com/gia-vang-the-gioi/";
     private static final String WEBGIA_HOME = "https://webgia.com/";
-    // Vang SJC: "Vang SJC 1L, 10L, 1KG 13.500.000 13.800.000" (dong/chi, 2 so co 2 dau cham)
     private static final Pattern WEBGIA_SJC = Pattern.compile("(?i)Vàng SJC 1L.{0,160}?(\\d{2}[.,]\\d{3}[.,]\\d{3})\\s+(\\d{2}[.,]\\d{3}[.,]\\d{3})", Pattern.DOTALL);
     private static final Pattern WEBGIA_SJC_HOME = Pattern.compile("(?i)SJC.{0,80}?(\\d{2}[.,]\\d{3}[.,]\\d{3})\\s+(\\d{2}[.,]\\d{3}[.,]\\d{3})", Pattern.DOTALL);
-    // Nhan: "Vang nhan SJC 99,99% ... 13.380.000 13.780.000"
     private static final Pattern WEBGIA_NHAN = Pattern.compile("(?i)Vàng nhẫn SJC.{0,200}?(\\d{2}[.,]\\d{3}[.,]\\d{3})\\s+(\\d{2}[.,]\\d{3}[.,]\\d{3})", Pattern.DOTALL);
-    // Vang the gioi: "3,895.09 USD" / "3.895 USD" / "3,895 USD"
     private static final Pattern WEBGIA_WORLD = Pattern.compile("(?i)(\\d[.,]\\d{3}[.,]\\d{2}|\\d[.,]\\d{3})\\s*USD", Pattern.DOTALL);
     private static final Pattern WEBGIA_WORLD2 = Pattern.compile("(?i)XAU.{0,200}?(\\d[.,]\\d{3}[.,]\\d{2})", Pattern.DOTALL);
 
@@ -180,9 +181,8 @@ public final class MarketService {
         return m;
     }
 
-    // ---------------- XANG — webgia.com ----------------
+    // ---------------- XANG — webgia.com, Vung 1, E10 Muc 3 ----------------
     private static Market fetchWebgiaFuel() {
-        // 1. Trang hien tai
         String[] urls = new String[]{WEBGIA_FUEL_PETROLIMEX, WEBGIA_FUEL};
         for (String u : urls) {
             try {
@@ -191,8 +191,6 @@ public final class MarketService {
                 if (m != null) return m;
             } catch (Exception ignored) {}
         }
-        // 2. Trang lich su theo ngay (trang hien tai doi khi load bang JS nen khong co bang trong HTML).
-        // Thu 14 ngay gan nhat: vd https://webgia.com/gia-xang-dau/petrolimex/2026-11-12.html
         try {
             Calendar cal = Calendar.getInstance();
             for (int i = 0; i < 14; i++) {
@@ -212,13 +210,10 @@ public final class MarketService {
         return null;
     }
 
-    // Parse ca HTML tho (giu script) + text da strip, vi bang webgia doi khi nam trong script/JSON
     private static Market parseFuelText(String html) {
         if (html == null) return null;
-        // A. Text da strip (bang HTML binh thuong)
         Market m = parseFuelFromText(stripHtml(html));
         if (m != null) return m;
-        // B. HTML tho: thay tag bang space nhung GIU script (bang co the nam trong JSON)
         try {
             String raw = HTML_TAG_PATTERN.matcher(html).replaceAll(" ");
             raw = decodeHtmlEntities(raw);
@@ -231,13 +226,17 @@ public final class MarketService {
 
     private static Market parseFuelFromText(String text) {
         if (text == null) return null;
-        String e10 = firstGroup(WEBGIA_E10, text);
-        if (e10 == null) e10 = firstGroup(WEBGIA_E10_ANY, text);
+        // E10: CHI MUC 3. Thu 3 cach viet, khong co fallback Muc 5.
+        String e10 = firstGroup(WEBGIA_E10_MUC3, text);
+        if (e10 == null) e10 = firstGroup(WEBGIA_E10_MUC3_V2, text);
+        if (e10 == null) e10 = firstGroup(WEBGIA_E10_MUC3_V3, text);
+        // E5 RON 92-II, DO 0,05S-II
         String e5 = firstGroup(WEBGIA_E5, text);
         String diesel = firstGroup(WEBGIA_DIESEL, text);
         if (diesel == null) diesel = firstGroup(WEBGIA_DIESEL2, text);
         if (!isValidFuel(e10) || !isValidFuel(e5) || !isValidFuel(diesel)) return null;
         Market m = new Market();
+        // Lay so dau tien sau ten = cot Vung 1. Vd "E10 RON 95-III 19.840 20.230" => 19.840
         m.e10 = e10.replace(',', '.');
         m.e5 = e5.replace(',', '.');
         m.diesel = diesel.replace(',', '.');
@@ -267,7 +266,6 @@ public final class MarketService {
         if (sjcHtml != null) {
             Market m = parseGoldSjcPage(sjcHtml);
             if (m != null) {
-                // Vang the gioi: thu trang rieng, neu khong co thi giu NO_DATA chu khong fail ca vang
                 try {
                     String wHtml = get(WEBGIA_GOLD_WORLD);
                     String w = parseWorldGold(wHtml);
@@ -283,7 +281,6 @@ public final class MarketService {
                 return m;
             }
         }
-        // Fallback trong webgia: trang tong + trang chu
         String[] fallbacks = new String[]{WEBGIA_GOLD, WEBGIA_HOME};
         for (String u : fallbacks) {
             try {
@@ -306,12 +303,10 @@ public final class MarketService {
     private static Market parseGoldSjcPage(String html) {
         if (html == null) return null;
         String text = stripHtml(html);
-        // SJC 1L: 13.500.000 13.800.000 (dong/chi)
         Matcher ms = WEBGIA_SJC.matcher(text);
         String buyRaw = null, sellRaw = null;
         if (ms.find()) { buyRaw = ms.group(1); sellRaw = ms.group(2); }
         else {
-            // Thu trong HTML tho (JSON/script)
             try {
                 String raw = normalizeText(decodeHtmlEntities(HTML_TAG_PATTERN.matcher(html).replaceAll(" ")));
                 Matcher ms2 = WEBGIA_SJC.matcher(raw);
@@ -322,7 +317,6 @@ public final class MarketService {
         Market m = new Market();
         m.sjcBuy = chiToTrieu(buyRaw);
         m.sjcSell = chiToTrieu(sellRaw);
-        // Nhan SJC: 13.380.000 13.780.000
         Matcher mn = WEBGIA_NHAN.matcher(text);
         if (mn.find()) {
             m.nhanBuy = chiToTrieu(mn.group(1));
@@ -361,7 +355,6 @@ public final class MarketService {
         return null;
     }
 
-    // "13.500.000" dong/chi -> "135,0" trieu/luong. "13.380.000" -> "133,8".
     private static String chiToTrieu(String v) {
         if (v == null) return NO_DATA;
         try {
